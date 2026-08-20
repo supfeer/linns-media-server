@@ -1,30 +1,30 @@
 # Linn's media server
 
-Минималистичный DLNA-сервер с небольшим desktop-интерфейсом для macOS, Windows и Linux.
+A minimal DLNA media server with a lightweight desktop interface for macOS, Windows, and Linux.
 
-## Desktop-приложение
+## Desktop application
 
 ```sh
 go run .
 ```
 
-Добавленные через окно библиотеки сохраняются в системной папке конфигурации. Закрытие окна скрывает приложение в tray; сервер продолжает работать.
+Libraries added through the application window are saved in the user configuration directory. Closing the window hides the application in the system tray while the server continues running.
 
-## Headless-режим
+## Headless mode
 
 ```sh
 go run . -media "/path/to/videos" -name "My Videos"
 ```
 
-## Локальная установка
+## Local installation
 
 ```sh
 go install fyne.io/tools/cmd/fyne@latest
 fyne install
 ```
 
-## Сборки
+## Builds
 
-GitHub Actions запускает тесты и собирает нативные пакеты для macOS, Windows и Linux. Готовые файлы доступны в artifacts запуска workflow `Build`.
+GitHub Actions runs the test suite and creates native packages for macOS, Windows, and Linux. Downloadable files are available in the artifacts of each `Build` workflow run.
 
-Изменения файлов применяются после двух одинаковых фоновых снимков. Затем сервер увеличивает `SystemUpdateID`, отправляет события `ContentDirectory` и выполняет SSDP `byebye/alive` с прежним UUID.
+File changes are applied after two identical background scans. The server then increments `SystemUpdateID`, sends `ContentDirectory` events, and performs an SSDP `byebye/alive` cycle while preserving the same UUID.
