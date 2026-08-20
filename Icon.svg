@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Linn's media server">
+  <path fill="#050b17" d="M104 0h304c57 0 104 47 104 104v304c0 57-47 104-104 104H104C47 512 0 465 0 408V104C0 47 47 0 104 0Z"/>
+  <g fill="none" stroke="#15243b" stroke-width="9" opacity=".9">
+    <path d="M-76 151 164-9a42 42 0 0 1 47-1l374 235a42 42 0 0 1 1 70L349 455a42 42 0 0 1-47 1L-77 221a42 42 0 0 1 1-70Z"/>
+    <path d="M-109 367 119 216a42 42 0 0 1 47-1l380 238a42 42 0 0 1 1 70L320 674"/>
+    <path d="M113-36 359-199M179 8 425-155M-63 397 177 238M-35 450 205 291"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-linecap="square" stroke-linejoin="round">
+    <path d="M91 145v113c0 43 19 63 61 63h47" stroke-width="34"/>
+    <path d="M226 210v111" stroke-width="34"/>
+    <path d="M226 151h1" stroke-width="34"/>
+    <path d="M268 321v-64c0-34 17-53 43-53 28 0 39 20 48 65l5 24c4 20 13 30 27 30 18 0 27-14 27-42v-24c0-34 17-53 43-53 27 0 40 19 40 53v64" stroke-width="32"/>
+  </g>
+  <text x="256" y="389" fill="#fff" font-family="Helvetica Neue, Helvetica, sans-serif" font-size="34" font-weight="400" text-anchor="middle">Linn’s media server</text>
+</svg>

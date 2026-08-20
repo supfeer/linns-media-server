@@ -1,0 +1,7 @@
+.DS_Store
+AGENTS.md
+docs/raw-requirements.md
+*.app/
+*.exe
+*.tar.gz
+dist/

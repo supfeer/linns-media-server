@@ -1,0 +1,84 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-24.04
+            target: linux
+            artifact: linns-media-server-linux-amd64
+          - name: Windows
+            runner: windows-2022
+            target: windows
+            artifact: linns-media-server-windows-amd64
+          - name: macOS
+            runner: macos-14
+            target: darwin
+            artifact: linns-media-server-macos-amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+
+      - name: Install Windows compiler
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: mingw-w64-x86_64-gcc
+
+      - name: Add Windows compiler to PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
+
+      - name: Test
+        run: go test ./...
+
+      - name: Install Fyne CLI
+        run: go install fyne.io/tools/cmd/fyne@v1.7.2
+
+      - name: Package
+        run: fyne package -os ${{ matrix.target }} -release
+
+      - name: Archive macOS application
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent "Linn's media server.app" linns-media-server-macos-amd64.zip
+
+      - name: Rename Linux package
+        if: runner.os == 'Linux'
+        run: mv "Linn's media server.tar.gz" linns-media-server-linux-amd64.tar.gz
+
+      - name: Rename Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Move-Item "Linn's media server.exe" linns-media-server-windows-amd64.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: linns-media-server-*
+          if-no-files-found: error
