@@ -70,7 +70,7 @@ jobs:
 
       - name: Rename Linux package
         if: runner.os == 'Linux'
-        run: mv "Linn's media server.tar.gz" linns-media-server-linux-amd64.tar.gz
+        run: mv "Linn's media server.tar.xz" linns-media-server-linux-amd64.tar.xz
 
       - name: Rename Windows package
         if: runner.os == 'Windows'

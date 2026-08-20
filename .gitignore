@@ -4,4 +4,5 @@ docs/raw-requirements.md
 *.app/
 *.exe
 *.tar.gz
+*.tar.xz
 dist/
