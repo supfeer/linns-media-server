@@ -20,11 +20,12 @@ func main() {
 	interfaceName := flag.String("interface", "", tr("linn.cli.interface"))
 	port := flag.Int("port", 1338, tr("linn.cli.port"))
 	scanInterval := flag.Duration("scan-interval", 2*time.Second, tr("linn.cli.scan_interval"))
+	background := flag.Bool("background", false, tr("linn.cli.background"))
 	flag.Parse()
 
 	var err error
 	if *mediaPath == "" {
-		err = runDesktop(*interfaceName, *scanInterval)
+		err = runDesktop(*interfaceName, *scanInterval, *background)
 	} else {
 		err = runHeadless(*mediaPath, *name, *interfaceName, *port, *scanInterval)
 	}

@@ -45,6 +45,6 @@ func setAutostart(enabled bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	entry := fmt.Sprintf("[Desktop Entry]\nType=Application\nName=Linn's media server\nExec=%s\nX-GNOME-Autostart-enabled=true\n", strconv.Quote(executable))
+	entry := fmt.Sprintf("[Desktop Entry]\nType=Application\nName=Linn's media server\nExec=%s --background\nX-GNOME-Autostart-enabled=true\n", strconv.Quote(executable))
 	return os.WriteFile(path, []byte(entry), 0o644)
 }

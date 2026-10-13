@@ -9,7 +9,9 @@ import (
 )
 
 type appConfig struct {
-	Libraries []librarySource `json:"libraries"`
+	Libraries       []librarySource         `json:"libraries"`
+	YouTubeEnabled  bool                    `json:"youtube_enabled,omitempty"`
+	YouTubePlayback youtubePlaybackSettings `json:"youtube_playback,omitzero"`
 }
 
 func appConfigPath() (string, error) {

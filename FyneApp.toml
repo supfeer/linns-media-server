@@ -3,7 +3,7 @@ Icon = "Icon.png"
 Name = "Linn's media server"
 ID = "dev.linns-media-server"
 Version = "0.0.1"
-Build = 1
+Build = 14
 
 [Migrations]
 fyneDo = true

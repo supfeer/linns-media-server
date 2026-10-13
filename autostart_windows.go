@@ -31,5 +31,5 @@ func setAutostart(enabled bool) error {
 	if err != nil {
 		return err
 	}
-	return exec.Command("reg", "add", windowsRunKey, "/v", "LinnsMediaServer", "/t", "REG_SZ", "/d", fmt.Sprintf(`"%s"`, executable), "/f").Run()
+	return exec.Command("reg", "add", windowsRunKey, "/v", "LinnsMediaServer", "/t", "REG_SZ", "/d", fmt.Sprintf(`"%s" --background`, executable), "/f").Run()
 }

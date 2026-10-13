@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Linn YouTube Connect",
+  "version": "1.0.0",
+  "description": "Connect your YouTube session to Linn's media server on this computer.",
+  "permissions": ["cookies", "activeTab"],
+  "host_permissions": ["https://*.youtube.com/*", "http://127.0.0.1/*"],
+  "action": {"default_popup": "connect.html", "default_title": "Linn YouTube Connect"}
+}

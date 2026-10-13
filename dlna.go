@@ -37,6 +37,8 @@ type mediaServer struct {
 	baseURL    string
 	localIP    net.IP
 	library    *library
+	youtube    *youtubeBridge
+	trace      *dlnaTrace
 	http       *http.Server
 	subsMu     sync.Mutex
 	subs       map[string]*subscription
@@ -77,6 +79,13 @@ func newMediaServer(name, udn, address string, localIP net.IP, library *library)
 	mux.HandleFunc("/control/connection", server.handleConnectionManager)
 	mux.HandleFunc("/event/content", server.handleEvent)
 	mux.HandleFunc("/media/", server.serveMedia)
+	mux.HandleFunc("/youtube/", func(w http.ResponseWriter, r *http.Request) {
+		if server.youtube == nil {
+			http.NotFound(w, r)
+			return
+		}
+		server.youtube.serve(w, r)
+	})
 	server.http = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -135,11 +144,18 @@ func (server *mediaServer) serveMedia(writer http.ResponseWriter, request *http.
 }
 
 func (server *mediaServer) handleContentDirectory(writer http.ResponseWriter, request *http.Request) {
+	started := time.Now()
+	action, err := requestAction(request)
+	server.trace.record(request, action, map[string]string{"phase": "received", "agent": request.UserAgent()})
+	response := &dlnaTraceResponse{ResponseWriter: writer, status: http.StatusOK}
+	writer = response
+	defer func() {
+		server.trace.record(request, action, map[string]string{"phase": "completed", "http_status": strconv.Itoa(response.status), "elapsed": time.Since(started).String()})
+	}()
 	if request.Method != http.MethodPost {
 		writer.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	action, err := requestAction(request)
 	if err != nil {
 		writeUPnPError(writer, 401, "Invalid Action")
 		return
@@ -147,13 +163,19 @@ func (server *mediaServer) handleContentDirectory(writer http.ResponseWriter, re
 
 	switch action {
 	case "GetSearchCapabilities":
-		writeSOAPResponse(writer, contentDirectoryURN, action, [][2]string{{"SearchCaps", ""}})
+		capabilities := ""
+		if server.youtube != nil {
+			capabilities = "dc:title,upnp:class"
+		}
+		writeSOAPResponse(writer, contentDirectoryURN, action, [][2]string{{"SearchCaps", capabilities}})
 	case "GetSortCapabilities":
 		writeSOAPResponse(writer, contentDirectoryURN, action, [][2]string{{"SortCaps", ""}})
 	case "GetSystemUpdateID":
 		writeSOAPResponse(writer, contentDirectoryURN, action, [][2]string{{"Id", strconv.FormatUint(uint64(server.library.systemUpdateID()), 10)}})
 	case "Browse":
 		server.handleBrowse(writer, request, action)
+	case "Search":
+		server.handleSearch(writer, request)
 	default:
 		writeUPnPError(writer, 401, "Invalid Action")
 	}
@@ -163,6 +185,7 @@ func (server *mediaServer) handleBrowse(writer http.ResponseWriter, request *htt
 	values, err := decodeSOAPValues(request.Body, map[string]bool{
 		"ObjectID": true, "BrowseFlag": true, "StartingIndex": true, "RequestedCount": true,
 	})
+	server.trace.record(request, action, values)
 	if err != nil {
 		writeUPnPError(writer, 402, "Invalid Args")
 		return
@@ -172,25 +195,33 @@ func (server *mediaServer) handleBrowse(writer http.ResponseWriter, request *htt
 		writeUPnPError(writer, 701, "No Such Object")
 		return
 	}
-	entry, ok := server.library.entry(rel)
-	if !ok {
-		writeUPnPError(writer, 701, "No Such Object")
-		return
-	}
-
 	var entries []mediaEntry
-	switch values["BrowseFlag"] {
-	case "BrowseMetadata":
-		entries = []mediaEntry{entry}
-	case "BrowseDirectChildren":
-		if !entry.Dir {
-			writeUPnPError(writer, 710, "No Such Container")
-			return
-		}
-		entries, _ = server.library.children(rel)
-	default:
+	if values["BrowseFlag"] != "BrowseMetadata" && values["BrowseFlag"] != "BrowseDirectChildren" {
 		writeUPnPError(writer, 402, "Invalid Args")
 		return
+	}
+	if server.youtube != nil && server.youtube.owns(rel) {
+		var ok bool
+		entries, ok = server.youtube.entries(rel, values["BrowseFlag"] == "BrowseMetadata")
+		if !ok {
+			writeUPnPError(writer, 701, "No Such Object")
+			return
+		}
+	} else {
+		entry, ok := server.library.entry(rel)
+		if !ok {
+			writeUPnPError(writer, 701, "No Such Object")
+			return
+		}
+		if values["BrowseFlag"] == "BrowseMetadata" {
+			entries = []mediaEntry{entry}
+		} else {
+			if !entry.Dir {
+				writeUPnPError(writer, 710, "No Such Container")
+				return
+			}
+			entries, _ = server.library.children(rel)
+		}
 	}
 
 	total := len(entries)
@@ -223,6 +254,9 @@ func (server *mediaServer) handleBrowse(writer http.ResponseWriter, request *htt
 		{"TotalMatches", strconv.Itoa(total)},
 		{"UpdateID", strconv.FormatUint(uint64(server.library.systemUpdateID()), 10)},
 	})
+	if server.youtube != nil && server.youtube.owns(rel) {
+		server.youtube.prewarm(entries)
+	}
 }
 
 func (server *mediaServer) handleConnectionManager(writer http.ResponseWriter, request *http.Request) {
@@ -244,6 +278,9 @@ func (server *mediaServer) handleConnectionManager(writer http.ResponseWriter, r
 				protocols = append(protocols, "http-get:*:"+mediaType+":"+dlnaFeatures())
 				seen[mediaType] = true
 			}
+		}
+		if server.youtube != nil {
+			protocols = append(protocols, "http-get:*:video/mp2t:"+youtubeDLNAFeatures)
 		}
 		sort.Strings(protocols)
 		writeSOAPResponse(writer, connectionManagerURN, action, [][2]string{{"Source", strings.Join(protocols, ",")}, {"Sink", ""}})
@@ -271,12 +308,19 @@ type didlDocument struct {
 }
 
 type didlContainer struct {
-	ID         string `xml:"id,attr"`
-	ParentID   string `xml:"parentID,attr"`
-	Restricted string `xml:"restricted,attr"`
-	ChildCount int    `xml:"childCount,attr"`
-	Title      string `xml:"dc:title"`
-	Class      string `xml:"upnp:class"`
+	ID          string           `xml:"id,attr"`
+	ParentID    string           `xml:"parentID,attr"`
+	Restricted  string           `xml:"restricted,attr"`
+	ChildCount  int              `xml:"childCount,attr"`
+	Title       string           `xml:"dc:title"`
+	Class       string           `xml:"upnp:class"`
+	Searchable  string           `xml:"searchable,attr,omitempty"`
+	SearchClass *didlSearchClass `xml:"upnp:searchClass,omitempty"`
+}
+
+type didlSearchClass struct {
+	IncludeDerived string `xml:"includeDerived,attr"`
+	Class          string `xml:",chardata"`
 }
 
 type didlItem struct {
@@ -287,11 +331,13 @@ type didlItem struct {
 	Class      string       `xml:"upnp:class"`
 	Date       string       `xml:"dc:date,omitempty"`
 	Resource   didlResource `xml:"res"`
+	AlbumArt   string       `xml:"upnp:albumArtURI,omitempty"`
 }
 
 type didlResource struct {
 	ProtocolInfo string `xml:"protocolInfo,attr"`
-	Size         int64  `xml:"size,attr"`
+	Size         int64  `xml:"size,attr,omitempty"`
+	Duration     string `xml:"duration,attr,omitempty"`
 	URL          string `xml:",chardata"`
 }
 
@@ -308,11 +354,32 @@ func (server *mediaServer) marshalDIDL(entries []mediaEntry) ([]byte, error) {
 			parentID = "-1"
 		}
 		if entry.Dir {
-			document.Containers = append(document.Containers, didlContainer{
+			item := didlContainer{
 				ID: idFor(entry.Rel), ParentID: parentID, Restricted: "1",
-				ChildCount: server.library.childCount(entry.Rel),
+				ChildCount: server.childCount(entry.Rel),
 				Title:      entry.Name, Class: "object.container.storageFolder",
-			})
+			}
+			if server.youtube != nil {
+				item.Searchable = "1"
+				item.SearchClass = &didlSearchClass{IncludeDerived: "1", Class: "object.item.videoItem"}
+			}
+			document.Containers = append(document.Containers, item)
+			continue
+		}
+		if server.youtube != nil && server.youtube.owns(entry.Rel) {
+			id := entry.Rel[strings.LastIndex(entry.Rel, "/")+1:]
+			video, ok := server.youtube.video(id)
+			if !ok {
+				continue
+			}
+			seconds := int(video.Duration)
+			duration := ""
+			if seconds > 0 {
+				duration = fmt.Sprintf("%d:%02d:%02d", seconds/3600, (seconds/60)%60, seconds%60)
+			}
+			document.Items = append(document.Items, didlItem{ID: idFor(entry.Rel), ParentID: parentID, Restricted: "1", Title: entry.Name, Class: "object.item.videoItem",
+				AlbumArt: server.baseURL + "/youtube/" + id + ".jpg",
+				Resource: didlResource{ProtocolInfo: "http-get:*:video/mp2t:" + youtubeDLNAFeatures, URL: server.baseURL + "/youtube/" + id + ".ts", Duration: duration}})
 			continue
 		}
 		id := idFor(entry.Rel)
@@ -709,11 +776,8 @@ func (server *ssdpServer) run(ctx context.Context) {
 func (server *ssdpServer) republish(ctx context.Context) {
 	server.announceMu.Lock()
 	defer server.announceMu.Unlock()
-	server.advertiseLocked("ssdp:byebye")
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return
-	case <-time.After(500 * time.Millisecond):
 	}
 	server.advertiseLocked("ssdp:alive")
 }
@@ -872,10 +936,23 @@ const contentDirectoryDescription = `<?xml version="1.0"?>
       <argument><name>TotalMatches</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
       <argument><name>UpdateID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_UpdateID</relatedStateVariable></argument>
     </argumentList></action>
+    <action><name>Search</name><argumentList>
+      <argument><name>ContainerID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_ObjectID</relatedStateVariable></argument>
+      <argument><name>SearchCriteria</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_SearchCriteria</relatedStateVariable></argument>
+      <argument><name>Filter</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Filter</relatedStateVariable></argument>
+      <argument><name>StartingIndex</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Index</relatedStateVariable></argument>
+      <argument><name>RequestedCount</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>SortCriteria</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_SortCriteria</relatedStateVariable></argument>
+      <argument><name>Result</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Result</relatedStateVariable></argument>
+      <argument><name>NumberReturned</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>TotalMatches</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>UpdateID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_UpdateID</relatedStateVariable></argument>
+    </argumentList></action>
   </actionList>
   <serviceStateTable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_ObjectID</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_BrowseFlag</name><dataType>string</dataType><allowedValueList><allowedValue>BrowseMetadata</allowedValue><allowedValue>BrowseDirectChildren</allowedValue></allowedValueList></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_SearchCriteria</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_Filter</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_SortCriteria</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_Index</name><dataType>ui4</dataType></stateVariable>
@@ -919,3 +996,11 @@ const connectionManagerDescription = `<?xml version="1.0"?>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_RcsID</name><dataType>i4</dataType></stateVariable>
   </serviceStateTable>
 </scpd>`
+
+func (server *mediaServer) childCount(rel string) int {
+	if server.youtube != nil && server.youtube.owns(rel) {
+		entries, _ := server.youtube.entries(rel, false)
+		return len(entries)
+	}
+	return server.library.childCount(rel)
+}

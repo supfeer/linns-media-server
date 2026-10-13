@@ -45,7 +45,7 @@ func setAutostart(enabled bool) error {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>dev.linns-media-server</string>
-<key>ProgramArguments</key><array><string>%s</string></array>
+<key>ProgramArguments</key><array><string>%s</string><string>--background</string></array>
 <key>RunAtLoad</key><true/>
 </dict></plist>
 `, html.EscapeString(executable))

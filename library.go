@@ -24,9 +24,10 @@ var videoMIMETypes = map[string]string{
 }
 
 type librarySource struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Path string `json:"path"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Virtual bool   `json:"-"`
 }
 
 type mediaEntry struct {
@@ -123,6 +124,10 @@ func scanSources(sources []librarySource, virtualRoot bool) (map[string]mediaEnt
 		entries["."] = mediaEntry{Rel: ".", Name: "Libraries", Dir: true}
 	}
 	for _, source := range sources {
+		if source.Virtual {
+			entries[source.ID] = mediaEntry{Rel: source.ID, Name: source.Name, Dir: true}
+			continue
+		}
 		rootInfo, err := os.Stat(source.Path)
 		if err != nil {
 			return nil, fmt.Errorf("scan library %q: %w", source.Name, err)

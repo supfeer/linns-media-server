@@ -65,11 +65,11 @@ func TestFileChangeNotifiesAndReadvertises(t *testing.T) {
 	}
 	defer udpSender.Close()
 	discovery := &ssdpServer{
-		group: udpReceiver.LocalAddr().(*net.UDPAddr),
-		sender: udpSender,
+		group:    udpReceiver.LocalAddr().(*net.UDPAddr),
+		sender:   udpSender,
 		location: "http://127.0.0.1:1338/device.xml",
-		udn: "uuid:test",
-		targets: []ssdpTarget{{typeName: "upnp:rootdevice", usn: "uuid:test::upnp:rootdevice"}},
+		udn:      "uuid:test",
+		targets:  []ssdpTarget{{typeName: "upnp:rootdevice", usn: "uuid:test::upnp:rootdevice"}},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,9 +94,9 @@ func TestFileChangeNotifiesAndReadvertises(t *testing.T) {
 	if err := udpReceiver.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	packets := make([]string, 0, 6)
+	packets := make([]string, 0, 3)
 	buffer := make([]byte, 4096)
-	for len(packets) < 6 {
+	for len(packets) < 3 {
 		count, _, err := udpReceiver.ReadFromUDP(buffer)
 		if err != nil {
 			t.Fatalf("read SSDP packet %d: %v", len(packets)+1, err)
@@ -104,11 +104,7 @@ func TestFileChangeNotifiesAndReadvertises(t *testing.T) {
 		packets = append(packets, string(buffer[:count]))
 	}
 	for index, packet := range packets {
-		expectedKind := "ssdp:byebye"
-		if index >= 3 {
-			expectedKind = "ssdp:alive"
-		}
-		if !strings.Contains(packet, "NTS: "+expectedKind) ||
+		if strings.Contains(packet, "ssdp:byebye") || !strings.Contains(packet, "NTS: ssdp:alive") ||
 			!strings.Contains(packet, "USN: uuid:test::upnp:rootdevice") {
 			t.Fatalf("unexpected SSDP packet %d: %q", index+1, packet)
 		}

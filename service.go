@@ -21,6 +21,7 @@ type serverOptions struct {
 	InterfaceName string
 	Port          int
 	ScanInterval  time.Duration
+	YouTube       *youtubeBridge
 }
 
 type runningServer struct {
@@ -66,12 +67,20 @@ func startServer(parent context.Context, options serverOptions) (*runningServer,
 	}
 	udn := stableUUID(hostname + "\x00" + identity)
 	server := newMediaServer(options.Name, udn, listener.Addr().String(), localIP, mediaLibrary)
+	server.youtube = options.YouTube
+	if cache, err := os.UserCacheDir(); err == nil {
+		directory := filepath.Join(cache, "FolderDLNA")
+		if err := os.MkdirAll(directory, 0700); err == nil {
+			server.trace = &dlnaTrace{file: filepath.Join(directory, "dlna-requests.json")}
+		}
+	}
 	discovery, err := newSSDP(networkInterface, server.deviceURL(), udn)
 	if err != nil {
 		listener.Close()
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(parent)
+	server.http.BaseContext = func(net.Listener) context.Context { return ctx }
 	running := &runningServer{cancel: cancel, done: make(chan struct{})}
 	httpErrors := make(chan error, 1)
 	go func() {
@@ -88,6 +97,46 @@ func startServer(parent context.Context, options serverOptions) (*runningServer,
 		server.notify(change)
 		discovery.republish(ctx)
 	})
+	if options.YouTube != nil {
+		go func() {
+			ticker := time.NewTicker(options.ScanInterval)
+			defer ticker.Stop()
+			var previous uint32
+			warmed := false
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+				if !warmed {
+					entries, _ := options.YouTube.entries(options.YouTube.source().ID+"/recommended", false)
+					if len(entries) > 0 {
+						options.YouTube.prewarm(entries)
+						warmed = true
+					}
+				}
+				version := options.YouTube.version()
+				if version == previous {
+					continue
+				}
+				previous = version
+				rel := options.YouTube.source().ID
+				mediaLibrary.mu.Lock()
+				mediaLibrary.updateID++
+				mediaLibrary.containerUpdates[rel]++
+				change := libraryChange{SystemID: mediaLibrary.updateID, Containers: map[string]uint32{rel: mediaLibrary.containerUpdates[rel]}}
+				for _, feed := range youtubeFeeds {
+					container := rel + "/" + feed.ID
+					mediaLibrary.containerUpdates[container]++
+					change.Containers[container] = mediaLibrary.containerUpdates[container]
+				}
+				mediaLibrary.mu.Unlock()
+				server.notify(change)
+				discovery.republish(ctx)
+			}
+		}()
+	}
 	go func() {
 		var runError error
 		select {
